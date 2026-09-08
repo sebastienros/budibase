@@ -1,4 +1,7 @@
 .modules/
+.aspire/
+aspire-output/
+.env*
 data/
 dist/
 node_modules/
