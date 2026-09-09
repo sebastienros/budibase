@@ -104,7 +104,8 @@ const redis = await builder
   .withImageTag("7.4")
   .withDataVolume()
   .withoutHttpsCertificate()
-// Budibase reads host:port and password separately, not a .NET connection string.
+
+// Budibase reads host:port and password separately
 const redisAddress = refExpr`${await redis.getConnectionProperty("Host")}:${await redis.getConnectionProperty("Port")}`
 
 const worker = await builder

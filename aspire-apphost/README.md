@@ -1,12 +1,14 @@
 # Budibase with Aspire
 
+[Aspire](https://aspire.dev) is a **free and open-source** code-first tool for
+composing, debugging, and deploying distributed applications.
+
 Run Budibase **from this checkout**, with Aspire managing its infrastructure,
 connections, startup order, health checks, and dashboard. The same TypeScript
 AppHost also builds the repository's Dockerfiles and deploys to Docker Compose.
 
 This is a development and local deployment workflow, not a production-hardened
-hosting configuration. The [validation and feedback log](STATUS.md) records what
-was exercised, problems encountered, and remaining limitations.
+hosting configuration.
 
 ## Why use this?
 
@@ -18,6 +20,9 @@ was exercised, problems encountered, and remaining limitations.
 - Aspire allocates internal ports and resolves connection expressions differently
   for host processes and containers. There are no hand-resolved `localhost`
   connection strings or `host.docker.internal` routing assumptions.
+- Nginx upstream addresses come from Aspire resource endpoints through environment
+  variables, so the proxy configuration does not need hard-coded upstream
+  hostnames or ports.
 - Secret parameters are generated instead of checked in. Named Docker volumes
   retain data across AppHost restarts.
 - Deployment reuses the source-built server, worker, and production proxy
@@ -26,36 +31,34 @@ was exercised, problems encountered, and remaining limitations.
 No Budibase service code, root workspace dependencies, or existing Compose files
 need to change.
 
+The dashboard's Graph view shows the source processes, supporting containers,
+status indicators, and dependency relationships in one place:
+
+![Aspire dashboard resource graph showing Budibase services and their dependencies](images/dashboard-resource-graph.png)
+
 ## Prerequisites and public CLI installation
 
 Use **Node.js 22.x** (at least 22.13), Corepack, Yarn Classic **1.22.22**, and a
-running Docker daemon with Docker Compose v2. Docker 28.0.4 / Compose 2.34.0 were
-used for validation. Budibase requires Node 22 even if the Aspire CLI supports
-newer Node versions.
+running Docker 28 or later with Docker Compose v2. Budibase requires Node 22 even
+if the Aspire CLI supports newer Node versions.
 
-Install the public **Aspire CLI 13.5.3**, the latest public 13.5 patch used here:
+Install the latest public **Aspire CLI**:
 
 ```sh
-curl -fsSL https://aspire.dev/install.sh | bash -s -- --version 13.5.3
-export PATH="$HOME/.aspire/bin:$PATH"
+npm install -g @microsoft/aspire-cli
 aspire --version
 ```
 
-For an existing standalone CLI installation, this was also exercised:
+Run the same npm install command to update the CLI to the latest stable release.
 
-```sh
-aspire update --self --channel stable --yes --non-interactive
-```
+The AppHost SDK and its four hosting packages are pinned to `13.5.3` in
+`aspire.config.json`. Restores use your existing NuGet configuration, which must
+allow these packages from nuget.org. No daily CLI or preview hosting packages
+are required.
 
-The update command follows the latest stable release, so use the version-pinned
-installer when reproducing this configuration. The AppHost SDK and its four
-hosting packages are pinned to `13.5.3` in `aspire.config.json`. `NuGet.Config`
-keeps restores on nuget.org, independent of inherited daily-feed source mappings.
-No daily CLI or preview hosting packages are required.
-
-The Compose dashboard is explicitly pinned to the public
-`mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2`: a public `13.5.3` dashboard
-image was not available during validation. The **CLI and AppHost remain 13.5.3**.
+The Compose dashboard uses the public
+`mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2` image alongside the
+**13.5.3 AppHost**.
 
 ## First run
 
@@ -71,11 +74,10 @@ yarn dev:init
 yarn build
 
 cd aspire-apphost
-npm ci
-aspire restore --non-interactive
-aspire start --non-interactive
-aspire wait proxy-service --timeout 180 --non-interactive
+aspire run
 ```
+
+`aspire run` restores the AppHost dependencies and starts the application.
 
 `yarn dev:init` only creates/updates the existing development `.env`; the server
 refuses to start in development without it. Aspire overrides the infrastructure
@@ -89,10 +91,10 @@ The root uses Yarn Classic, but the AppHost has its own **npm lockfile**. Keep
 lockfile and rejects the TypeScript AppHost. Its `.npmrc` and lockfile use the
 public npm registry rather than a machine-specific package mirror. Vite's
 per-resource dependency installer is disabled because workspace dependencies
-were installed once at the root.
+are installed once at the root.
 
 Open **http://localhost:10000/builder/**. The dashboard login URL is printed by
-`aspire start`. For foreground operation, use `aspire run` instead.
+`aspire run`.
 
 The initial admin email is `local@budibase.com`. Retrieve its generated
 **local-development** password privately:
@@ -100,6 +102,9 @@ The initial admin email is `local@budibase.com`. Retrieve its generated
 ```sh
 aspire secret get Parameters:bb-admin-user-password
 ```
+
+Alternatively, open the Aspire dashboard's **Parameters** tab, find
+`bb-admin-user-password`, and reveal its value there.
 
 This is not the standard `yarn dev` password. To supply your own initial
 credentials, use `aspire secret set Parameters:bb-admin-user-email <email>` and
@@ -138,9 +143,9 @@ Budibase consumes its own environment variable names, not
 | Development Nginx upstreams | `endpoint.property(EndpointProperty.HostAndPort)` |
 
 The Postgres `Uri` handles URI encoding and container-local host/port selection.
-Redis credentials stay separate because Budibase's Redis parser is not a .NET
-connection-string parser. Redis explicitly disables Aspire's HTTPS certificate
-provisioning to match Budibase's plain Redis connection.
+Redis receives `host:port` and a separate password, matching Budibase's parser
+rather than a .NET connection string. Redis explicitly disables Aspire's HTTPS
+certificate provisioning to match Budibase's plain Redis connection.
 
 In particular, backend-core reads **`COUCH_DB_USER`**, even though its internal
 property is named `COUCH_DB_USERNAME`. Explicitly supplying `COUCH_DB_SQL_URL`
@@ -148,11 +153,14 @@ also avoids Budibase falling back to the fixed development SQL port.
 
 Only the public proxy port is fixed at `10000`, matching the repository workflow.
 Vite's HMR client and the worker's cluster port use that same value. Internal
-development ports are Aspire-managed. The dashboard profile retains ports
-`15100`, `19100`, and `20100` from the original AppHost. HTTP is intentional for
+development ports are Aspire-managed. The dashboard profile in
+`aspire.config.json` uses ports `15100`, `19100`, and `20100`. HTTP is intentional for
 this local Nginx/Node stack; add a proper TLS boundary before remote hosting.
 
 ## Health, logs, and stopping
+
+For background operation, run `aspire start` from `aspire-apphost`. Use
+`aspire stop` when finished; named data volumes are preserved.
 
 ```sh
 # Run from aspire-apphost.
@@ -178,11 +186,22 @@ string-template watchers have process status, not application health probes;
 the initial `yarn build` is still required. Routify routes are generated by that
 build; run the builder's existing build again after changing route files.
 
+An MCP client can launch `aspire agent mcp` and call `list_resources` to inspect
+resource health and configured environment variable names, or `list_console_logs`
+to diagnose connections. In 13.5.3, MCP returns `null` for environment values,
+including non-secret URLs. Use `aspire describe --format Json` to inspect resolved
+non-secret values locally, and do not share credentials or login tokens.
+
 If a service is `Running` but `Unhealthy`, inspect its logs before weakening the
 check: nodemon remains running when its Node child crashes. An app waiting for
 the worker, and a proxy waiting for the app, are expected dependency behavior.
 
 ## Docker Compose deployment
+
+Aspire also supports deployment to **Kubernetes** and **Azure**, including Azure
+Container Apps, using the corresponding hosting integrations with the same
+application resource model. This AppHost configures
+Docker Compose; other targets require their own deployment configuration.
 
 Build the repository first as above. Stop the local AppHost to free port 10000:
 
@@ -192,20 +211,20 @@ aspire stop --non-interactive
 aspire publish --list-steps --non-interactive
 aspire publish --non-interactive
 aspire deploy --list-steps --non-interactive
-aspire deploy --environment Validation --non-interactive
+aspire deploy --environment Production --non-interactive
 ```
 
 For image builds and environment preparation without starting containers:
 
 ```sh
-aspire do prepare-compose --environment Validation --non-interactive
+aspire do prepare-compose --environment Production --non-interactive
 ```
 
 Aspire writes `aspire-output/docker-compose.yaml`. Publish creates `.env`
-placeholders; prepare/deploy writes resolved `.env.Validation`, including secrets
+placeholders; prepare/deploy writes resolved `.env.Production`, including secrets
 and local image tags. Deployment parameters are persisted separately from
 development user secrets: get the **deployment** admin password from
-`BB_ADMIN_USER_PASSWORD` in `.env.Validation`, not `aspire secret get`.
+`BB_ADMIN_USER_PASSWORD` in `.env.Production`, not `aspire secret get`.
 Keep the deployment state and credentials when reusing its data volumes.
 
 The app and worker images consume this checkout's `dist`, builder, client, and
@@ -226,48 +245,46 @@ Compose model. LiteLLM's config is a read-only bind mount:
 a self-contained remote deployment bundle.
 
 **Do not treat `aspire deploy` success or the production proxy's `/health` as an
-end-to-end readiness check.** In 13.5.3 the generated Compose file did not include
-the AppHost's health checks, and dependencies used `service_started`. Production
+end-to-end readiness check.** In 13.5.3 the generated Compose file does not include
+the AppHost's health checks, and dependencies use `service_started`. Production
 Nginx returns its own static health response. Inspect real backends and use the UI:
 
 ```sh
 docker compose ls
 # Use the project name shown above, not a new Compose project.
-docker compose -p <project-name> --env-file aspire-output/.env.Validation \
+docker compose -p <project-name> --env-file aspire-output/.env.Production \
   -f aspire-output/docker-compose.yaml ps --all
-docker compose -p <project-name> --env-file aspire-output/.env.Validation \
+docker compose -p <project-name> --env-file aspire-output/.env.Production \
   -f aspire-output/docker-compose.yaml exec -T app-service \
   curl -fsS http://localhost:4001/health
-docker compose -p <project-name> --env-file aspire-output/.env.Validation \
+docker compose -p <project-name> --env-file aspire-output/.env.Production \
   -f aspire-output/docker-compose.yaml exec -T worker-service \
   curl -fsS http://localhost:4002/health
 ```
 
-Open http://localhost:10000/builder/, sign in, and exercise the application.
+Open http://localhost:10000/builder/ and sign in.
 The dashboard gets a dynamically published port printed by deployment.
 
 To stop this deployment without deleting data:
 
 ```sh
-docker compose -p <project-name> --env-file aspire-output/.env.Validation \
+docker compose -p <project-name> --env-file aspire-output/.env.Production \
   -f aspire-output/docker-compose.yaml stop
 ```
 
 `aspire stop` stops local development, not a Compose deployment. Use
-`aspire destroy --environment Validation` only when you intend to tear down the
+`aspire destroy --environment Production` only when you intend to tear down the
 deployment, after backing up any data you need.
 
 ## Data and scope
 
-Development and Compose use separate named volumes. They are not migrations of
-the original preview AppHost's `data/` bind mounts; existing `data/` is left
-untouched. Back up and migrate old data deliberately rather than deleting it to
-resolve a credential mismatch.
+Development and Compose use separate named volumes. Existing `data/` bind mounts
+are left untouched. Back up and migrate old data deliberately rather than
+deleting it to resolve a credential mismatch.
 
 Generated `.aspire/` modules, local `.env*`, `aspire-output/`, and data are ignored.
 Edit `apphost.mts`, never generated SDK modules or generated Compose YAML.
 
-Console logs are available in the local dashboard, but this does not add a
-Budibase OpenTelemetry bootstrap. Distributed traces, cloud deployment,
-external AI models, and production security/backup/restart policies are outside
-the validated scope. See [STATUS.md](STATUS.md) for concrete feedback candidates.
+Console logs are available in the local dashboard. Distributed tracing requires
+an OpenTelemetry bootstrap in Budibase. Cloud deployment, external AI models,
+and production security, backup, and restart policies require additional setup.
