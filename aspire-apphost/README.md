@@ -12,9 +12,10 @@ hosting configuration.
 
 ## Why use this?
 
-- One resource graph replaces separately starting databases, caches, Node
-  processes, and the proxy. The dashboard brings their status and console logs
-  together.
+- A single `aspire run` command starts the whole service stack: databases,
+  caches, Node processes, and the proxy. Developers can debug service issues
+  from the unified dashboard and inspect distributed traces from services
+  instrumented with OpenTelemetry.
 - Server and worker use their existing nodemon workflows; client and
   string-template builds watch local source, and the builder uses Vite/HMR.
 - Aspire allocates internal ports and resolves connection expressions differently
